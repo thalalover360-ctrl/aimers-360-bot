@@ -1,4 +1,6 @@
-python-telegram-bot>=20.0
-google-genai
+python-telegram-bot
 aiohttp
+google-genai
+groq
+openai
 
