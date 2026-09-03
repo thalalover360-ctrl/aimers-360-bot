@@ -12,7 +12,7 @@ GEMINI_KEY = os.environ.get("GEMINI_KEY")
 
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
-# 1. Web server for Render Free Tier
+# 1. Dummy Web Server (Render Free Tier)
 async def handle_ping(request):
     return web.Response(text="Aimers 360 running fine!")
 
@@ -31,8 +31,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🎯 *Aimers 360 Active!*\n\n"
         "• Quiz generate karne ke liye: `/quiz <topic ya book>`\n"
-        "  _Example:_ `/quiz class 11 black book quadratic equations`\n"
-        "• Doubt puchne ke liye mujhe mention karo ya private me text karo!"
+        "  _Example:_ `/quiz class 10 polynomial`\n"
+        "• Doubt puchne ke liye mujhe message karo!"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -40,7 +40,6 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
     
-    # Agar group hai, toh tabhi bolo jab bot ko tag/reply kiya ho (group spam rokne ke liye)
     is_group = update.message.chat.type in ["group", "supergroup"]
     bot_username = (await context.bot.get_me()).username
     is_mentioned = f"@{bot_username}" in update.message.text if bot_username else False
@@ -64,60 +63,52 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if res and res.text:
             await update.message.reply_text(res.text)
-    except Exception:
-        pass
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
 
 async def generate_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    topic = " ".join(context.args) if context.args else "Class 11 Physics Kinematics JEE Advanced"
+    topic = " ".join(context.args) if context.args else "Class 11 Physics Kinematics"
 
     status = await update.message.reply_text(f"⚡ Generating quiz: `{topic}`...", parse_mode="Markdown")
 
     prompt = f"""
     Create 1 tough, conceptual multiple choice question on: '{topic}'.
     Reference level: HC Verma, Irodov, Black Book, or Oswaal Class 10.
-    Output strictly raw JSON only (no markdown, no backticks):
-    {{
-      "question": "Problem text (max 280 chars)",
-      "options": ["Opt A", "Opt B", "Opt C", "Opt D"],
-      "correct_index": 0,
-      "explanation": "Short logic (max 180 chars)"
-    }}
+    Provide the output in JSON format with these exact keys:
+    question (max 280 chars),
+    options (list of exactly 4 strings),
+    correct_index (integer from 0 to 3),
+    explanation (string max 180 chars).
     """
 
-    data = None
-    # 2 bar direct call karega thode gap ke sath agar Google busy ho
-    for attempt in range(2):
-        try:
-            res = ai_client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=prompt
-            )
-            if res and res.text:
-                raw = res.text.strip()
-                raw = re.sub(r"^```(json)?", "", raw).rstrip("`").strip()
-                data = json.loads(raw)
-                break
-        except Exception:
-            await asyncio.sleep(2)
-
-    if not data:
-        await status.edit_text("⚠️ Google servers par load spike hai. 10 second baad dobara command bhejo!")
-        return
-
     try:
+        # Native JSON formatting force kar diya
+        res = ai_client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json"
+            }
+        )
+
+        raw = res.text.strip()
+        data = json.loads(raw)
+
         await context.bot.send_poll(
             chat_id=chat_id,
             question=data["question"][:300],
-            options=[opt[:100] for opt in data["options"][:4]],
+            options=[str(opt)[:100] for opt in data["options"][:4]],
             type="quiz",
             correct_option_id=int(data["correct_index"]),
-            explanation=data["explanation"][:200],
+            explanation=str(data.get("explanation", ""))[:200],
             open_period=60
         )
         await status.delete()
+
     except Exception as err:
-        await status.edit_text(f"⚠️ Error formatting poll: {err}")
+        # Asli error dikhega taaki pata chale
+        await status.edit_text(f"⚠️ Quiz error: {err}")
 
 # 3. Main Runner
 async def main():
