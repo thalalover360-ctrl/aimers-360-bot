@@ -12,9 +12,9 @@ GEMINI_KEY = os.environ.get("GEMINI_KEY")
 
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
-# 1. Dummy Web Server (Render Free Tier)
+# 1. Web server for Render Free Tier
 async def handle_ping(request):
-    return web.Response(text="Aimers 360 is Running Fast!")
+    return web.Response(text="Aimers 360 running fine!")
 
 async def start_web_server():
     app = web.Application()
@@ -25,55 +25,58 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"Server started on port {port}")
 
-# 2. Telegram Handlers
+# 2. Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🎯 *Aimers 360 - Superfast Academic Bot!*\n\n"
-        "• Quiz ke liye: `/quiz <topic ya book>`\n"
-        "  _Examples:_ `/quiz irodov relative motion`, `/quiz hc verma friction`, `/quiz class 10 light`\n"
-        "• Doubts ya chat ke liye: Seedha message type karo!"
+        "🎯 *Aimers 360 Active!*\n\n"
+        "• Quiz generate karne ke liye: `/quiz <topic ya book>`\n"
+        "  _Example:_ `/quiz class 11 black book quadratic equations`\n"
+        "• Doubt puchne ke liye mujhe mention karo ya private me text karo!"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-# Fast AI Chat (Sirf 3.6 aur 3)
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-    user_text = update.message.text
-
-    chat_prompt = f"You are Aimers 360 AI mentor for JEE & Class 10/11 boards. Crisp, sharp, helpful in Hinglish/English. User: {user_text}"
     
-    reply_text = None
-    for model_name in ["gemini-3.6-flash", "gemini-3-flash"]:
-        try:
-            res = ai_client.models.generate_content(
-                model=model_name,
-                contents=chat_prompt
-            )
-            if res and res.text:
-                reply_text = res.text
-                break
-        except Exception:
-            continue
+    # Agar group hai, toh tabhi bolo jab bot ko tag/reply kiya ho (group spam rokne ke liye)
+    is_group = update.message.chat.type in ["group", "supergroup"]
+    bot_username = (await context.bot.get_me()).username
+    is_mentioned = f"@{bot_username}" in update.message.text if bot_username else False
+    is_reply_to_bot = (
+        update.message.reply_to_message 
+        and update.message.reply_to_message.from_user 
+        and update.message.reply_to_message.from_user.id == context.bot.id
+    )
 
-    if reply_text:
-        await update.message.reply_text(reply_text)
-    else:
-        await update.message.reply_text("Ek second, dobara send karo!")
+    if is_group and not (is_mentioned or is_reply_to_bot):
+        return
 
-# Fast Quiz Handler (Sirf 3.6 aur 3, Zero Delay)
+    clean_text = update.message.text.replace(f"@{bot_username}", "").strip()
+    if not clean_text:
+        return
+
+    try:
+        res = ai_client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=f"You are Aimers 360 AI mentor for JEE & Class 10/11 boards. Crisp, clear, friendly in Hinglish. Query: {clean_text}"
+        )
+        if res and res.text:
+            await update.message.reply_text(res.text)
+    except Exception:
+        pass
+
 async def generate_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     topic = " ".join(context.args) if context.args else "Class 11 Physics Kinematics JEE Advanced"
 
-    status = await update.message.reply_text(f"⚡ Generating quiz for `{topic}`...", parse_mode="Markdown")
+    status = await update.message.reply_text(f"⚡ Generating quiz: `{topic}`...", parse_mode="Markdown")
 
     prompt = f"""
-    Create 1 tough, conceptual multiple choice question for: '{topic}'.
+    Create 1 tough, conceptual multiple choice question on: '{topic}'.
     Reference level: HC Verma, Irodov, Black Book, or Oswaal Class 10.
-    Output strictly raw JSON only (no markdown formatting, no code fences):
+    Output strictly raw JSON only (no markdown, no backticks):
     {{
       "question": "Problem text (max 280 chars)",
       "options": ["Opt A", "Opt B", "Opt C", "Opt D"],
@@ -82,32 +85,27 @@ async def generate_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }}
     """
 
-    res_text = None
-    last_err = None
-
-    # Sirf 3.6 aur 3 me switch karega
-    for model_name in ["gemini-3.6-flash", "gemini-3-flash"]:
+    data = None
+    # 2 bar direct call karega thode gap ke sath agar Google busy ho
+    for attempt in range(2):
         try:
             res = ai_client.models.generate_content(
-                model=model_name,
+                model="gemini-3.6-flash",
                 contents=prompt
             )
             if res and res.text:
-                res_text = res.text
+                raw = res.text.strip()
+                raw = re.sub(r"^```(json)?", "", raw).rstrip("`").strip()
+                data = json.loads(raw)
                 break
-        except Exception as e:
-            last_err = e
-            continue
+        except Exception:
+            await asyncio.sleep(2)
 
-    if not res_text:
-        await status.edit_text(f"⚠️ Server thoda busy hai: {last_err}")
+    if not data:
+        await status.edit_text("⚠️ Google servers par load spike hai. 10 second baad dobara command bhejo!")
         return
 
     try:
-        raw = res_text.strip()
-        raw = re.sub(r"^```(json)?", "", raw).rstrip("`").strip()
-        data = json.loads(raw)
-
         await context.bot.send_poll(
             chat_id=chat_id,
             question=data["question"][:300],
@@ -118,9 +116,8 @@ async def generate_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
             open_period=60
         )
         await status.delete()
-
     except Exception as err:
-        await status.edit_text(f"⚠️ Error: {err}")
+        await status.edit_text(f"⚠️ Error formatting poll: {err}")
 
 # 3. Main Runner
 async def main():
@@ -135,7 +132,7 @@ async def main():
     await tg_app.start()
     await tg_app.updater.start_polling()
 
-    print("🚀 Aimers 360 is live!")
+    print("🚀 Aimers 360 live!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
