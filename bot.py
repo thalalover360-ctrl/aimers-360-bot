@@ -7,15 +7,16 @@ from google import genai
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Secure environment variables
+# Secure environment variables from Render
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_KEY")
 
+# Modern Google GenAI Client
 ai_client = genai.Client(api_key=GEMINI_KEY)
 
-# 1. Dummy Web Server (Render free tier ke liye mandatory)
+# 1. Dummy Web Server (Render Free Tier ke liye zaroori hai)
 async def handle_ping(request):
-    return web.Response(text="Aimers 360 Quiz Master is Running!")
+    return web.Response(text="Aimers 360 Quiz Master is Alive and Running!")
 
 async def start_web_server():
     app = web.Application()
@@ -26,20 +27,20 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"Server started on port {port}")
+    print(f"Web server started on port {port}")
 
-# 2. Telegram Bot Handlers
+# 2. Telegram Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "🎯 *Aimers 360 - Competitive Book Quiz Engine!*\n\n"
-        "Tough books & exam level questions instant generate honge:\n\n"
-        "📌 *Examples:*\n"
+        "Main Class 10 & 11 ke toughest books se questions banata hoon.\n\n"
+        "📌 *Examples of commands:*\n"
         "• `/quiz irodov relative motion`\n"
         "• `/quiz hc verma friction`\n"
         "• `/quiz black book quadratic equations`\n"
         "• `/quiz mole concept stoichiometry`\n"
         "• `/quiz oswaal class 10 light refraction`\n"
-        "• `/quiz class 10 nationalism in europe`"
+        "• `/quiz class 10 polynomial`"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -47,18 +48,18 @@ async def generate_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     topic = " ".join(context.args) if context.args else "Class 11 Physics Kinematics JEE Advanced level"
 
-    status = await update.message.reply_text(f"📖 *Aimers 360:* Scanning top books for `{topic}`...", parse_mode="Markdown")
+    status = await update.message.reply_text(f"📖 *Aimers 360:* Scanning books for `{topic}`...", parse_mode="Markdown")
 
     prompt = f"""
     You are an elite competitive exam setter trained deeply on standard reference books:
-    - JEE/Class 11: I.E. Irodov, HC Verma (Concepts of Physics), Vikas Gupta (Black Book for Advanced Maths), MS Chouhan, N Awasthi, JEE Mains & Advanced PYQs.
+    - JEE / Class 11: I.E. Irodov, HC Verma (Concepts of Physics), Vikas Gupta (Black Book for Advanced Maths), MS Chouhan, N Awasthi, JEE Mains & Advanced PYQs.
     - Class 10: Oswaal Question Bank, NCERT Exemplar, Educart, CBSE Board PYQs.
 
     Task:
     Generate 1 authentic, conceptual, tricky multiple-choice question on: '{topic}'.
-    If a specific book is named, strictly follow that book's difficulty and style.
+    If a specific book is requested, strictly follow that book's difficulty and style.
 
-    Return ONLY a raw JSON object (no markdown formatting, no code fences):
+    Return ONLY a raw JSON object without markdown fences, code blocks, or extra notes:
     {{
       "question": "Clear problem statement (max 280 chars)",
       "options": ["Option A", "Option B", "Option C", "Option D"],
@@ -68,14 +69,17 @@ async def generate_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
 
     try:
+        # Latest Gemini 3.6 Flash engine
         response = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=prompt
         )
+
         raw = response.text.strip()
         raw = re.sub(r"^```(json)?", "", raw).rstrip("`").strip()
         data = json.loads(raw)
 
+        # Send Native Telegram Quiz
         await context.bot.send_poll(
             chat_id=chat_id,
             question=data["question"][:300],
@@ -102,7 +106,7 @@ async def main():
     await tg_app.start()
     await tg_app.updater.start_polling()
 
-    print("🚀 Aimers 360 Bot live!")
+    print("🚀 Aimers 360 is live!")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
